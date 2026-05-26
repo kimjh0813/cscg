@@ -1,22 +1,22 @@
 from data import ANIME_LIST
+from scoring import calculate_recommendation_score
 
 
-def recommend_anime(selected_genres, limit=5):
-    if not selected_genres:
+def recommend_anime(primary_genre, secondary_genres=None, limit=5):
+    if not primary_genre:
         return []
 
+    secondary_genres = secondary_genres or []
     recommendations = []
 
     for anime in ANIME_LIST:
-        matched_genres = set(anime["genres"]) & set(selected_genres)
+        score_info = calculate_recommendation_score(anime, primary_genre, secondary_genres)
 
-        if matched_genres:
-            score = len(matched_genres) * 10 + anime["rating"]
+        if score_info["primary_affinity"] > 0 or score_info["secondary_affinity"]:
             recommendations.append(
                 {
                     **anime,
-                    "matched_genres": sorted(matched_genres),
-                    "score": score,
+                    **score_info,
                 }
             )
 

@@ -12,6 +12,7 @@ class AnimeRecommenderApp:
         self.root.geometry("780x560")
         self.root.minsize(680, 500)
 
+        self.primary_genre_var = tk.StringVar()
         self.genre_vars = {}
 
         self._configure_style()
@@ -55,8 +56,24 @@ class AnimeRecommenderApp:
     def _create_genre_panel(self, parent):
         genre_frame = ttk.LabelFrame(parent, text="장르 선택", padding=14)
         genre_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        genre_frame.rowconfigure(0, weight=1)
+        genre_frame.rowconfigure(3, weight=1)
         genre_frame.columnconfigure(0, weight=1)
+
+        genres = get_all_genres()
+
+        primary_label = ttk.Label(genre_frame, text="1순위 장르", background="#ffffff")
+        primary_label.grid(row=0, column=0, columnspan=2, sticky="w")
+
+        primary_combo = ttk.Combobox(
+            genre_frame,
+            textvariable=self.primary_genre_var,
+            values=genres,
+            state="readonly",
+        )
+        primary_combo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 14))
+
+        secondary_label = ttk.Label(genre_frame, text="추가 장르", background="#ffffff")
+        secondary_label.grid(row=2, column=0, columnspan=2, sticky="nw", pady=(0, 6))
 
         genre_canvas = tk.Canvas(
             genre_frame,
@@ -64,10 +81,10 @@ class AnimeRecommenderApp:
             highlightthickness=0,
             width=120,
         )
-        genre_canvas.grid(row=0, column=0, sticky="nsew")
+        genre_canvas.grid(row=3, column=0, sticky="nsew")
 
         genre_scrollbar = ttk.Scrollbar(genre_frame, orient="vertical", command=genre_canvas.yview)
-        genre_scrollbar.grid(row=0, column=1, sticky="ns")
+        genre_scrollbar.grid(row=3, column=1, sticky="ns")
         genre_canvas.configure(yscrollcommand=genre_scrollbar.set)
 
         checkbox_frame = ttk.Frame(genre_canvas, style="Card.TFrame")
@@ -82,14 +99,14 @@ class AnimeRecommenderApp:
         checkbox_frame.bind("<Configure>", update_scroll_region)
         genre_canvas.bind("<Configure>", update_canvas_width)
 
-        for index, genre in enumerate(get_all_genres()):
+        for index, genre in enumerate(genres):
             var = tk.BooleanVar()
             checkbox = ttk.Checkbutton(checkbox_frame, text=genre, variable=var, style="Genre.TCheckbutton")
             checkbox.grid(row=index, column=0, sticky="w", pady=3)
             self.genre_vars[genre] = var
 
         button_frame = ttk.Frame(genre_frame)
-        button_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        button_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
         recommend_button = ttk.Button(
             button_frame,
@@ -133,46 +150,56 @@ class AnimeRecommenderApp:
         self.result_text.configure(yscrollcommand=scrollbar.set)
 
     def show_recommendations(self):
-        selected_genres = [
+        primary_genre = self.primary_genre_var.get()
+        secondary_genres = [
             genre for genre, var in self.genre_vars.items()
-            if var.get()
+            if var.get() and genre != primary_genre
         ]
 
-        if not selected_genres:
-            messagebox.showwarning("장르 선택 필요", "추천받을 장르를 하나 이상 선택해주세요.")
+        if not primary_genre:
+            messagebox.showwarning("1순위 장르 선택 필요", "가장 중요하게 볼 1순위 장르를 선택해주세요.")
             return
 
-        recommendations = recommend_anime(selected_genres)
-        result = self._format_recommendations(selected_genres, recommendations)
+        recommendations = recommend_anime(primary_genre, secondary_genres)
+        result = self._format_recommendations(primary_genre, secondary_genres, recommendations)
 
         self.result_text.configure(state="normal")
         self.result_text.delete("1.0", "end")
         self.result_text.insert("1.0", result)
         self.result_text.configure(state="disabled")
 
-    def _format_recommendations(self, selected_genres, recommendations):
+    def _format_recommendations(self, primary_genre, secondary_genres, recommendations):
         lines = [
-            f"선택한 장르: {', '.join(selected_genres)}",
+            f"1순위 장르: {primary_genre}",
+            f"추가 장르: {', '.join(secondary_genres) if secondary_genres else '없음'}",
             "",
             "추천 애니 TOP 5",
             "-" * 34,
         ]
 
         for index, anime in enumerate(recommendations, start=1):
+            secondary_matches = ", ".join(anime["secondary_affinity"].keys()) or "없음"
             lines.extend(
                 [
                     f"{index}. {anime['title']} ({anime['year']})",
                     f"   평점: {anime['rating']}",
                     f"   장르: {', '.join(anime['genres'])}",
-                    f"   선택 장르와 일치: {', '.join(anime['matched_genres'])}",
+                    f"   1순위 장르 가까움: {anime['primary_affinity']:.2f}",
+                    f"   추가 장르 반영: {secondary_matches}",
+                    f"   추천 점수: {anime['score']:.2f}",
                     f"   소개: {anime['description']}",
                     "",
                 ]
             )
 
+        if not recommendations:
+            lines.append("조건에 맞는 추천 결과가 없습니다.")
+
         return "\n".join(lines)
 
     def reset_selection(self):
+        self.primary_genre_var.set("")
+
         for var in self.genre_vars.values():
             var.set(False)
 
