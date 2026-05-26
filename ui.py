@@ -1,8 +1,15 @@
 import tkinter as tk
+import subprocess
+import tempfile
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 from data import get_all_genres
 from recommender import recommend_anime
+
+
+BASE_DIR = Path(__file__).resolve().parent
+POSTER_CACHE_DIR = Path(tempfile.gettempdir()) / "anime_recommender_posters"
 
 
 class AnimeRecommenderApp:
@@ -14,6 +21,7 @@ class AnimeRecommenderApp:
 
         self.primary_genre_var = tk.StringVar()
         self.genre_vars = {}
+        self.poster_images = []
 
         self._configure_style()
         self._create_layout()
@@ -26,6 +34,9 @@ class AnimeRecommenderApp:
         style.configure("Title.TLabel", font=("맑은 고딕", 20, "bold"), background="#f5f7fb", foreground="#1f2937")
         style.configure("Subtitle.TLabel", font=("맑은 고딕", 10), background="#f5f7fb", foreground="#4b5563")
         style.configure("Card.TFrame", background="#ffffff", relief="flat")
+        style.configure("Result.TFrame", background="#ffffff")
+        style.configure("ResultTitle.TLabel", font=("맑은 고딕", 12, "bold"), background="#ffffff", foreground="#111827")
+        style.configure("ResultText.TLabel", font=("맑은 고딕", 10), background="#ffffff", foreground="#374151")
         style.configure("Genre.TCheckbutton", font=("맑은 고딕", 10), background="#ffffff", foreground="#1f2937")
         style.configure("Primary.TButton", font=("맑은 고딕", 11, "bold"), padding=(14, 8))
         style.configure("Secondary.TButton", font=("맑은 고딕", 10), padding=(10, 6))
@@ -130,24 +141,29 @@ class AnimeRecommenderApp:
         result_frame.rowconfigure(0, weight=1)
         result_frame.columnconfigure(0, weight=1)
 
-        self.result_text = tk.Text(
+        self.result_canvas = tk.Canvas(
             result_frame,
-            wrap="word",
-            font=("맑은 고딕", 10),
             bg="#ffffff",
-            fg="#111827",
-            padx=12,
-            pady=12,
-            relief="solid",
-            borderwidth=1,
+            highlightthickness=0,
         )
-        self.result_text.grid(row=0, column=0, sticky="nsew")
-        self.result_text.insert("1.0", "왼쪽에서 장르를 선택하고 추천받기 버튼을 눌러보세요.")
-        self.result_text.configure(state="disabled")
+        self.result_canvas.grid(row=0, column=0, sticky="nsew")
 
-        scrollbar = ttk.Scrollbar(result_frame, command=self.result_text.yview)
+        scrollbar = ttk.Scrollbar(result_frame, orient="vertical", command=self.result_canvas.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
-        self.result_text.configure(yscrollcommand=scrollbar.set)
+        self.result_canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.result_container = ttk.Frame(self.result_canvas, style="Result.TFrame")
+        container_window = self.result_canvas.create_window((0, 0), window=self.result_container, anchor="nw")
+
+        def update_scroll_region(event):
+            self.result_canvas.configure(scrollregion=self.result_canvas.bbox("all"))
+
+        def update_container_width(event):
+            self.result_canvas.itemconfigure(container_window, width=event.width)
+
+        self.result_container.bind("<Configure>", update_scroll_region)
+        self.result_canvas.bind("<Configure>", update_container_width)
+        self._show_placeholder()
 
     def show_recommendations(self):
         primary_genre = self.primary_genre_var.get()
@@ -161,41 +177,132 @@ class AnimeRecommenderApp:
             return
 
         recommendations = recommend_anime(primary_genre, secondary_genres)
-        result = self._format_recommendations(primary_genre, secondary_genres, recommendations)
+        self._render_recommendations(primary_genre, secondary_genres, recommendations)
 
-        self.result_text.configure(state="normal")
-        self.result_text.delete("1.0", "end")
-        self.result_text.insert("1.0", result)
-        self.result_text.configure(state="disabled")
+    def _clear_results(self):
+        self.poster_images.clear()
 
-    def _format_recommendations(self, primary_genre, secondary_genres, recommendations):
-        lines = [
-            f"1순위 장르: {primary_genre}",
-            f"추가 장르: {', '.join(secondary_genres) if secondary_genres else '없음'}",
-            "",
-            "추천 애니 TOP 5",
-            "-" * 34,
-        ]
+        for widget in self.result_container.winfo_children():
+            widget.destroy()
 
-        for index, anime in enumerate(recommendations, start=1):
-            secondary_matches = ", ".join(anime["secondary_affinity"].keys()) or "없음"
-            lines.extend(
-                [
-                    f"{index}. {anime['title']} ({anime['year']})",
-                    f"   평점: {anime['rating']}",
-                    f"   장르: {', '.join(anime['genres'])}",
-                    f"   1순위 장르 가까움: {anime['primary_affinity']:.2f}",
-                    f"   추가 장르 반영: {secondary_matches}",
-                    f"   추천 점수: {anime['score']:.2f}",
-                    f"   소개: {anime['description']}",
-                    "",
-                ]
-            )
+    def _show_placeholder(self):
+        self._clear_results()
+        label = ttk.Label(
+            self.result_container,
+            text="왼쪽에서 장르를 선택하고 추천받기 버튼을 눌러보세요.",
+            style="ResultText.TLabel",
+        )
+        label.pack(anchor="w", padx=12, pady=12)
+
+    def _render_recommendations(self, primary_genre, secondary_genres, recommendations):
+        self._clear_results()
+
+        summary = ttk.Label(
+            self.result_container,
+            text=f"1순위 장르: {primary_genre}\n추가 장르: {', '.join(secondary_genres) if secondary_genres else '없음'}",
+            style="ResultText.TLabel",
+        )
+        summary.pack(anchor="w", fill="x", padx=12, pady=(8, 12))
 
         if not recommendations:
-            lines.append("조건에 맞는 추천 결과가 없습니다.")
+            empty_label = ttk.Label(
+                self.result_container,
+                text="조건에 맞는 추천 결과가 없습니다.",
+                style="ResultText.TLabel",
+            )
+            empty_label.pack(anchor="w", padx=12, pady=12)
+            return
 
-        return "\n".join(lines)
+        for index, anime in enumerate(recommendations, start=1):
+            self._create_result_card(index, anime)
+
+    def _create_result_card(self, index, anime):
+        card = ttk.Frame(self.result_container, style="Result.TFrame", padding=10)
+        card.pack(fill="x", padx=8, pady=(0, 10))
+        card.columnconfigure(1, weight=1)
+
+        poster_image = self._load_poster_image(anime.get("poster"))
+        if poster_image:
+            poster_label = ttk.Label(card, image=poster_image, background="#ffffff")
+            poster_label.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 12))
+            self.poster_images.append(poster_image)
+        else:
+            poster_placeholder = tk.Label(
+                card,
+                text="No Image",
+                width=12,
+                height=8,
+                bg="#e5e7eb",
+                fg="#6b7280",
+            )
+            poster_placeholder.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 12))
+
+        title = ttk.Label(
+            card,
+            text=f"{index}. {anime['title']} ({anime['year']})",
+            style="ResultTitle.TLabel",
+        )
+        title.grid(row=0, column=1, sticky="ew")
+
+        secondary_matches = ", ".join(anime["secondary_affinity"].keys()) or "없음"
+        detail = ttk.Label(
+            card,
+            text=(
+                f"평점: {anime['rating']} | 추천 점수: {anime['score']:.2f}\n"
+                f"장르: {', '.join(anime['genres'])}\n"
+                f"1순위 장르 가까움: {anime['primary_affinity']:.2f} | 추가 장르 반영: {secondary_matches}\n"
+                f"소개: {anime['description']}"
+            ),
+            style="ResultText.TLabel",
+            wraplength=390,
+            justify="left",
+        )
+        detail.grid(row=1, column=1, sticky="new", pady=(6, 0))
+
+    def _load_poster_image(self, poster_path):
+        image_path = self._get_displayable_poster_path(poster_path)
+
+        if not image_path:
+            return None
+
+        try:
+            image = tk.PhotoImage(file=image_path)
+        except tk.TclError:
+            return None
+
+        width_scale = max(1, image.width() // 95)
+        height_scale = max(1, image.height() // 135)
+        return image.subsample(width_scale, height_scale)
+
+    def _get_displayable_poster_path(self, poster_path):
+        if not poster_path:
+            return None
+
+        path = BASE_DIR / poster_path
+
+        if not path.exists():
+            return None
+
+        if path.suffix.lower() == ".png":
+            return path
+
+        POSTER_CACHE_DIR.mkdir(exist_ok=True)
+        cache_path = POSTER_CACHE_DIR / path.with_suffix(".png").name
+
+        if cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
+            return cache_path
+
+        try:
+            subprocess.run(
+                ["sips", "-s", "format", "png", str(path), "--out", str(cache_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return None
+
+        return cache_path
 
     def reset_selection(self):
         self.primary_genre_var.set("")
@@ -203,7 +310,4 @@ class AnimeRecommenderApp:
         for var in self.genre_vars.values():
             var.set(False)
 
-        self.result_text.configure(state="normal")
-        self.result_text.delete("1.0", "end")
-        self.result_text.insert("1.0", "왼쪽에서 장르를 선택하고 추천받기 버튼을 눌러보세요.")
-        self.result_text.configure(state="disabled")
+        self._show_placeholder()
