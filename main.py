@@ -1,12 +1,8 @@
-import tkinter as tk
-
-from ui import AnimeRecommenderApp
+from ui import run_app
 
 
 def main():
-    root = tk.Tk()
-    AnimeRecommenderApp(root)
-    root.mainloop()
+    run_app()
 
 
 if __name__ == "__main__":
