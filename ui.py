@@ -9,6 +9,7 @@ from kivy.properties import ListProperty, NumericProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.image import Image
 from kivy.uix.label import Label
@@ -49,7 +50,13 @@ class GenreSpinnerOption(SpinnerOption):
         self.background_color = SOFT
         self.color = WHITE
         self.size_hint_y = None
-        self.height = dp(40)
+        self.height = dp(34)
+
+
+class GenreDropDown(DropDown):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.max_height = dp(280)
 
 
 def _poster_path(anime):
@@ -298,6 +305,7 @@ class AnimeRecommenderKivyApp(App):
             text="1순위 장르",
             values=self.genres,
             option_cls=GenreSpinnerOption,
+            dropdown_cls=GenreDropDown,
             font_name=FONT_NAME,
             font_size=sp(14),
             size_hint=(1, None),

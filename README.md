@@ -16,6 +16,18 @@ Kivy를 사용해 브라우저가 아닌 데스크톱 앱 창으로 실행됩니
 
 ## 실행 방법
 
+이 프로젝트는 Kivy를 사용하므로 Python 3.11 또는 3.12 사용을 권장합니다.
+Windows에서 Python 3.14로 실행하면 Kivy 설치가 실패할 수 있습니다.
+
+Windows PowerShell:
+
+```powershell
+py -3.11 -m pip install -r requirements.txt
+py -3.11 main.py
+```
+
+macOS/Linux:
+
 ```bash
 python3.11 -m pip install -r requirements.txt
 python3.11 main.py
