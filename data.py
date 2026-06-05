@@ -190,7 +190,7 @@ ANIME_LIST = [
     },
     {
         "title": "그 비스크 돌은 사랑을 한다",
-        "poster": "assets/posters/bocchi_the_rock.jpg",
+        "poster": "assets/posters/sono_bisque_doll.jpg",
         "genres": ["음악", "코미디", "일상"],
         "genre_affinity": {"로맨스": 1.0, "코미디": 0.9, "일상": 0.8, "성장": 0.75},
         "year": 2022,
