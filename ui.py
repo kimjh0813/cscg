@@ -20,7 +20,7 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 
 from data import ANIME_LIST, get_all_genres
-from recommender import recommend_anime
+from filtering import DEFAULT_PRIMARY_GENRE, genre_summary, request_recommendations
 from theme import BLACK, CARD, MUTED, PANEL, RED, SOFT, WHITE
 
 
@@ -40,6 +40,7 @@ def _register_korean_font():
 FONT_NAME = _register_korean_font()
 
 
+# 장르 선택 Spinner의 드롭다운 항목 스타일을 담당하는 클래스
 class GenreSpinnerOption(SpinnerOption):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -53,12 +54,14 @@ class GenreSpinnerOption(SpinnerOption):
         self.height = dp(34)
 
 
+# 장르 드롭다운 목록이 화면보다 너무 길어지지 않도록 높이를 제한하는 클래스
 class GenreDropDown(DropDown):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.max_height = dp(280)
 
 
+# 애니 데이터에 저장된 포스터 경로를 실제 파일 경로로 변환한다.
 def _poster_path(anime):
     poster = anime.get("poster")
 
@@ -69,14 +72,12 @@ def _poster_path(anime):
     return str(path) if path.exists() else ""
 
 
-def _genre_summary(genres):
-    return ", ".join(genres) if genres else "추가 장르 없음"
-
-
+# 앱 시작 시 기본으로 보여줄 대표 애니를 평점과 연도 기준으로 선택한다.
 def _featured_anime():
     return max(ANIME_LIST, key=lambda anime: (anime["rating"], anime["year"]))
 
 
+# 앱에서 반복해서 사용하는 Kivy Label 생성 함수
 def _label(
     text,
     font_size=14,
@@ -99,6 +100,7 @@ def _label(
     )
 
     def update_text_size(instance, width):
+        # 라벨 폭이 바뀔 때 줄바꿈 기준도 함께 갱신한다.
         text_height = instance.height if height is not None else None
         instance.text_size = (width, text_height)
 
@@ -116,6 +118,7 @@ def _label(
     return label
 
 
+# 배경색과 둥근 모서리를 가진 공통 패널 클래스
 class RoundedPanel(BoxLayout):
     background_color = ListProperty(PANEL)
     radius = NumericProperty(dp(8))
@@ -123,6 +126,7 @@ class RoundedPanel(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # Kivy 기본 BoxLayout에는 배경이 없으므로 canvas에 직접 사각형을 그린다.
         with self.canvas.before:
             self._panel_color = Color(*self.background_color)
             self._panel_rect = RoundedRectangle(
@@ -139,12 +143,14 @@ class RoundedPanel(BoxLayout):
         )
 
     def _update_canvas(self, *args):
+        # 패널 위치, 크기, 색상이 바뀔 때 배경 사각형도 함께 갱신한다.
         self._panel_color.rgba = self.background_color
         self._panel_rect.pos = self.pos
         self._panel_rect.size = self.size
         self._panel_rect.radius = [self.radius]
 
 
+# 상세 팝업에서 장르를 작은 태그 형태로 표시하기 위한 함수
 def _tag(text, background=SOFT, color=WHITE):
     tag = RoundedPanel(
         orientation="vertical",
@@ -159,6 +165,7 @@ def _tag(text, background=SOFT, color=WHITE):
     return tag
 
 
+# 추가 장르 선택에 사용하는 토글 버튼 클래스
 class GenreToggle(ToggleButton):
     def __init__(self, genre, **kwargs):
         super().__init__(**kwargs)
@@ -185,6 +192,7 @@ class GenreToggle(ToggleButton):
         self.text_size = (self.width - dp(24), self.height)
 
     def _update_state_style(self, *args):
+        # 선택된 장르는 빨간색, 선택되지 않은 장르는 회색으로 표시한다.
         self.text = self.genre
         if self.active:
             self.background_color = RED
@@ -193,6 +201,90 @@ class GenreToggle(ToggleButton):
         self._update_text_size()
 
 
+# 1순위 장르, 추가 장르, 추천/초기화 버튼을 묶은 필터 UI 클래스
+class FilterPanel(RoundedPanel):
+    def __init__(self, genres, on_recommend, on_reset, **kwargs):
+        super().__init__(
+            orientation="vertical",
+            spacing=dp(12),
+            padding=dp(18),
+            size_hint=(None, 1),
+            width=dp(310),
+            background_color=PANEL,
+            radius=dp(8),
+            **kwargs,
+        )
+        self.genres = genres
+        self.secondary_toggles = {}
+
+        self.add_widget(_label("취향 선택", font_size=20, bold=True))
+        self.add_widget(_label("가장 중요한 장르를 먼저 고른 뒤, 함께 보고 싶은 분위기를 추가하세요.", color=MUTED))
+
+        # 1순위 장르는 하나만 선택할 수 있도록 Spinner를 사용한다.
+        self.primary_spinner = Spinner(
+            text=DEFAULT_PRIMARY_GENRE,
+            values=self.genres,
+            option_cls=GenreSpinnerOption,
+            dropdown_cls=GenreDropDown,
+            font_name=FONT_NAME,
+            font_size=sp(14),
+            size_hint=(1, None),
+            height=dp(44),
+            background_normal="",
+            background_down="",
+            background_color=SOFT,
+            color=WHITE,
+        )
+        self.add_widget(self.primary_spinner)
+        self.add_widget(_label("추가 장르", color=MUTED, height=24))
+
+        # 추가 장르는 여러 개 선택할 수 있으므로 스크롤 가능한 토글 목록으로 만든다.
+        scroll = ScrollView(size_hint=(1, 1))
+        genre_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_y=None)
+        genre_box.bind(minimum_height=genre_box.setter("height"))
+
+        for genre in self.genres:
+            toggle = GenreToggle(genre)
+            genre_box.add_widget(toggle)
+            self.secondary_toggles[genre] = toggle
+
+        scroll.add_widget(genre_box)
+        self.add_widget(scroll)
+
+        # 버튼은 외부에서 전달받은 추천 실행 함수와 초기화 함수를 연결한다.
+        button_row = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint=(1, None), height=dp(48))
+        button_row.add_widget(self._button("추천받기", on_recommend, background=RED))
+        button_row.add_widget(self._button("초기화", on_reset, width=dp(86), background=SOFT))
+        self.add_widget(button_row)
+
+    @property
+    def primary_genre(self):
+        return self.primary_spinner.text
+
+    def reset_selection(self):
+        # 필터 초기화 시 1순위 장르와 모든 추가 장르 선택을 원래 상태로 되돌린다.
+        self.primary_spinner.text = DEFAULT_PRIMARY_GENRE
+
+        for toggle in self.secondary_toggles.values():
+            toggle.state = "normal"
+
+    def _button(self, text, callback, width=None, background=SOFT):
+        button = Button(
+            text=text,
+            font_name=FONT_NAME,
+            bold=True,
+            background_normal="",
+            background_down="",
+            background_color=background,
+            color=WHITE,
+            size_hint=(None, 1) if width else (1, 1),
+            width=width or dp(120),
+        )
+        button.bind(on_release=lambda instance: callback())
+        return button
+
+
+# 추천 결과 목록에서 한 작품을 카드 형태로 보여주는 클래스
 class PosterCard(ButtonBehavior, RoundedPanel):
     def __init__(self, index, anime, open_detail, **kwargs):
         super().__init__(
@@ -210,6 +302,7 @@ class PosterCard(ButtonBehavior, RoundedPanel):
 
         poster = _poster_path(anime)
         if poster:
+            # 포스터 파일이 있으면 카드 상단에 이미지를 표시한다.
             self.add_widget(
                 Image(
                     source=poster,
@@ -219,6 +312,7 @@ class PosterCard(ButtonBehavior, RoundedPanel):
                 )
             )
         else:
+            # 포스터가 없을 때도 카드 크기가 무너지지 않도록 대체 영역을 보여준다.
             placeholder = RoundedPanel(
                 orientation="vertical",
                 background_color=SOFT,
@@ -248,9 +342,11 @@ class PosterCard(ButtonBehavior, RoundedPanel):
         self.add_widget(text_area)
 
     def on_release(self):
+        # 카드를 클릭하면 해당 애니의 상세 팝업을 연다.
         self.open_detail(self.anime)
 
 
+# Kivy 앱 전체를 구성하고 화면 전환/렌더링을 관리하는 메인 클래스
 class AnimeRecommenderKivyApp(App):
     title = "ANIFLIX 애니 추천"
 
@@ -258,14 +354,17 @@ class AnimeRecommenderKivyApp(App):
         Window.clearcolor = BLACK
         Window.size = (1180, 760)
         self.genres = get_all_genres()
-        self.secondary_toggles = {}
 
+        # 전체 화면은 상단 헤더와 본문 영역으로 구성한다.
         root = BoxLayout(orientation="vertical", spacing=0)
         root.add_widget(self._create_header())
 
         content = BoxLayout(orientation="horizontal", spacing=dp(18), padding=dp(20))
-        content.add_widget(self._create_filter_panel())
+        # 필터 UI는 FilterPanel 클래스로 분리하여 왼쪽 영역에 배치한다.
+        self.filter_panel = FilterPanel(self.genres, self.show_recommendations, self.reset_selection)
+        content.add_widget(self.filter_panel)
 
+        # 오른쪽 영역은 기본 화면, 추천 결과, 상세 진입용 카드 목록을 표시한다.
         self.result_area = BoxLayout(orientation="vertical", spacing=dp(18), size_hint=(1, 1))
         content.add_widget(self.result_area)
 
@@ -287,55 +386,6 @@ class AnimeRecommenderKivyApp(App):
         header.add_widget(Widget())
         return header
 
-    def _create_filter_panel(self):
-        panel = RoundedPanel(
-            orientation="vertical",
-            spacing=dp(12),
-            padding=dp(18),
-            size_hint=(None, 1),
-            width=dp(310),
-            background_color=PANEL,
-            radius=dp(8),
-        )
-
-        panel.add_widget(_label("취향 선택", font_size=20, bold=True))
-        panel.add_widget(_label("가장 중요한 장르를 먼저 고른 뒤, 함께 보고 싶은 분위기를 추가하세요.", color=MUTED))
-
-        self.primary_spinner = Spinner(
-            text="1순위 장르",
-            values=self.genres,
-            option_cls=GenreSpinnerOption,
-            dropdown_cls=GenreDropDown,
-            font_name=FONT_NAME,
-            font_size=sp(14),
-            size_hint=(1, None),
-            height=dp(44),
-            background_normal="",
-            background_down="",
-            background_color=SOFT,
-            color=WHITE,
-        )
-        panel.add_widget(self.primary_spinner)
-        panel.add_widget(_label("추가 장르", color=MUTED, height=24))
-
-        scroll = ScrollView(size_hint=(1, 1))
-        genre_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_y=None)
-        genre_box.bind(minimum_height=genre_box.setter("height"))
-
-        for genre in self.genres:
-            toggle = GenreToggle(genre)
-            genre_box.add_widget(toggle)
-            self.secondary_toggles[genre] = toggle
-
-        scroll.add_widget(genre_box)
-        panel.add_widget(scroll)
-
-        button_row = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint=(1, None), height=dp(48))
-        button_row.add_widget(self._button("추천받기", self.show_recommendations, background=RED))
-        button_row.add_widget(self._button("초기화", self.reset_selection, width=dp(86), background=SOFT))
-        panel.add_widget(button_row)
-        return panel
-
     def _button(self, text, callback, width=None, background=SOFT):
         button = Button(
             text=text,
@@ -352,11 +402,13 @@ class AnimeRecommenderKivyApp(App):
         return button
 
     def _render_default(self):
+        # 아직 추천 조건을 선택하지 않았을 때 보여주는 기본 인기 작품 화면
         self._render_hero(_featured_anime())
         popular = sorted(ANIME_LIST, key=lambda anime: anime["rating"], reverse=True)[:10]
         self._render_results("오늘의 인기 애니", "처음이라면 평점이 높은 작품부터 둘러보세요.", popular)
 
     def _render_hero(self, anime, primary_genre=None, secondary_genres=None):
+        # 추천 결과의 대표 작품을 크게 보여주는 상단 영역
         hero = RoundedPanel(
             orientation="horizontal",
             spacing=dp(22),
@@ -391,12 +443,13 @@ class AnimeRecommenderKivyApp(App):
         copy.add_widget(_label(anime["description"], font_size=15, color=MUTED))
 
         if primary_genre:
-            copy.add_widget(_label(f"1순위 {primary_genre} · {_genre_summary(secondary_genres)}", color=WHITE))
+            copy.add_widget(_label(f"1순위 {primary_genre} · {genre_summary(secondary_genres)}", color=WHITE))
 
         hero.add_widget(copy)
         self.result_area.add_widget(hero)
 
     def _render_results(self, title, subtitle, anime_list):
+        # 추천 결과나 인기 작품 목록을 스크롤 가능한 카드 그리드로 출력한다.
         result_scroll = ScrollView(size_hint=(1, 1))
         result_box = BoxLayout(orientation="vertical", spacing=dp(14), size_hint_y=None)
         result_box.bind(minimum_height=result_box.setter("height"))
@@ -405,6 +458,7 @@ class AnimeRecommenderKivyApp(App):
         result_box.add_widget(_label(subtitle, color=MUTED))
 
         if not anime_list:
+            # 추천 결과가 비어 있을 때는 빈 화면 대신 안내 문구를 보여준다.
             empty = RoundedPanel(
                 orientation="vertical",
                 background_color=CARD,
@@ -427,34 +481,32 @@ class AnimeRecommenderKivyApp(App):
         self.result_area.add_widget(result_scroll)
 
     def show_recommendations(self):
-        primary_genre = self.primary_spinner.text
+        # FilterPanel에서 선택한 값을 filtering.py에 넘겨 검증과 추천 요청을 처리한다.
+        result = request_recommendations(self.filter_panel.primary_genre, self.filter_panel.secondary_toggles)
 
-        if primary_genre == "1순위 장르":
-            self._show_message("1순위 장르 선택 필요", "가장 중요하게 볼 1순위 장르를 선택해주세요.")
+        if not result.is_valid:
+            self._show_message(result.error_title, result.error_message)
             return
 
-        secondary_genres = [
-            genre
-            for genre, toggle in self.secondary_toggles.items()
-            if toggle.active and genre != primary_genre
-        ]
-        recommendations = recommend_anime(primary_genre, secondary_genres)
+        primary_genre = result.request.primary_genre
+        secondary_genres = result.request.secondary_genres
+        recommendations = result.recommendations
 
+        # 기존 기본 화면을 지우고 추천 결과 화면으로 다시 렌더링한다.
         self.result_area.clear_widgets()
         self._render_hero(recommendations[0] if recommendations else _featured_anime(), primary_genre, secondary_genres)
-        self._render_results("추천 결과", f"1순위 {primary_genre} · {_genre_summary(secondary_genres)}", recommendations)
+        self._render_results("추천 결과", f"1순위 {primary_genre} · {genre_summary(secondary_genres)}", recommendations)
 
     def reset_selection(self):
-        self.primary_spinner.text = "1순위 장르"
-
-        for toggle in self.secondary_toggles.values():
-            toggle.state = "normal"
+        # 필터와 결과 영역을 모두 초기 상태로 되돌린다.
+        self.filter_panel.reset_selection()
 
         if hasattr(self, "result_area"):
             self.result_area.clear_widgets()
             self._render_default()
 
     def open_detail(self, anime):
+        # 카드 클릭 시 작품 정보를 팝업으로 자세히 보여준다.
         content = RoundedPanel(
             orientation="vertical",
             spacing=dp(16),
@@ -466,6 +518,7 @@ class AnimeRecommenderKivyApp(App):
         poster = _poster_path(anime)
 
         if poster:
+            # 상세 화면 왼쪽에는 작품 포스터를 크게 표시한다.
             poster_panel = RoundedPanel(
                 orientation="vertical",
                 padding=0,
@@ -514,7 +567,8 @@ class AnimeRecommenderKivyApp(App):
         )
 
         if anime.get("primary_affinity") is not None:
-            secondary = _genre_summary(anime.get("secondary_affinity", {}).keys())
+            # 추천 결과에서 열린 상세 화면이면 추천에 반영된 장르 정보도 함께 표시한다.
+            secondary = genre_summary(anime.get("secondary_affinity", {}).keys())
             description_box.add_widget(
                 _label(
                     f"1순위 장르 가까움 {anime['primary_affinity']:.2f} · 추가 반영 {secondary}",
