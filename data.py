@@ -191,11 +191,11 @@ ANIME_LIST = [
     {
         "title": "그 비스크 돌은 사랑을 한다",
         "poster": "assets/posters/sono_bisque_doll.jpg",
-        "genres": ["음악", "코미디", "일상"],
+        "genres": ["로맨스", "코미디", "일상"],
         "genre_affinity": {"로맨스": 1.0, "코미디": 0.9, "일상": 0.8, "성장": 0.75},
         "year": 2022,
         "rating": 4.7,
-        "description": "극도의 커뮤니케이션 장애 소녀가 밴드 활동을 통해 친구와 음악을 찾아가는 성장물.",
+        "description": "인형 옷 제작에 빠진 소년과 코스프레를 사랑하는 소녀가 함께 성장하는 로맨스 코미디.",
     },
     {
         "title": "강철의 연금술사",
